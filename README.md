@@ -1,70 +1,30 @@
-Auto-Clicker Pro 🖱️⚡
+# AutoClicker Pro
 
-Overview & Purpose
+![Project Demo](demo.gif)
 
-Auto-Clicker Pro is an advanced, open-source desktop automation tool featuring a highly customizable auto-clicker and a full-fledged macro recorder. It is designed to help users automate repetitive graphical interface tasks, streamline testing procedures, and execute complex sequences with precision.
+A multi-threaded Python desktop automation tool featuring a standard auto-clicker and an advanced macro recorder with a custom, syntax-highlighted script editor.
 
-Key Features
+## ✨ Features
+* **Advanced Macro Recorder:** Records complex sequences of mouse movements, clicks, and keystrokes globally.
+* **Custom Scripting Engine:** Macros are compiled into a custom, human-readable script format (e.g., `WAIT`, `MOVE`, `KEY_DOWN`, `WAIT_PIXEL`).
+* **Integrated IDE:** Built-in script editor featuring live syntax highlighting, line numbers, and file I/O for saving and loading macro profiles.
+* **Dynamic Playback:** Supports adjustable playback speeds, scheduled executions, and infinite or bounded looping.
+* **Pixel Color Detection:** Includes logic to pause macro execution until a specific pixel on the screen matches a target RGB value.
+* **Thread-Safe UI:** Built with Tkinter, utilizing asynchronous threading to ensure the GUI remains responsive during intense macro execution. 
 
-Dual Functionality: Seamlessly switch between a standard interval-based auto-clicker and a robust macro recorder via a tabbed interface.
+## 🛠️ Built With
+* **Python 3**
+* **Tkinter:** Frontend GUI
+* **pynput:** Global hardware event hooking and simulation
+* **mss & Pillow:** High-speed screen capture and pixel color extraction
 
-Advanced Macro Scripting Engine: Features a built-in text editor with custom syntax highlighting, line numbers, and the ability to load/save macro scripts (.txt).
+## 🚀 Quick Start
 
-Smart Pixel Detection: Includes a WAIT_PIXEL command using screen-capturing technology to pause macro execution until a specific pixel color appears on screen.
+1. Clone the repository:
+`git clone https://github.com/ZacharyBarry/autoclicker-macro.git`
 
-Global Hotkey Listeners: Set custom keyboard hotkeys to start/stop clicking, record macros, or play them back without needing the application in focus.
+2. Install the required dependencies:
+`pip install pynput mss Pillow`
 
-Dynamic Playback Controls: Adjust playback speed multipliers, schedule delayed starts, and define exact loop repeat counts.
-
-Responsive UI: Built with Dark/Light mode toggles, an "Always on Top" feature, and real-time status bars and progress tracking.
-
-Technologies Used
-
-Language: Python 3
-
-GUI Framework: Tkinter (with ttk for modern themed widgets)
-
-Input Control: pynput (for global mouse and keyboard listeners/controllers)
-
-Screen Capturing & Image Processing: mss (fast screen grabs) and Pillow (PIL) for precise pixel color detection.
-
-Concurrency: threading module (to ensure the UI remains responsive while intensive clicking or recording loops run in the background).
-
-Setup & Installation Instructions
-
-Ensure Python is installed:
-You must have Python 3.x installed on your system.
-
-Clone the repository:
-
-git clone [https://github.com/ZacharyBarry/autoclicker-macro.git](https://github.com/ZacharyBarry/autoclicker-macro.git)
-cd autoclicker-macro
-
-
-Install Required Dependencies:
-Install the required external libraries using pip:
-
-pip install pynput mss Pillow
-
-
-Run the Application:
-Execute the python script from your terminal:
-
-python autoclicker.py
-
-
-Usage
-
-Auto-Clicker: Set your interval, choose whether to click at the current mouse location or specific X/Y coordinates, set your hotkey, and press Start.
-
-Macro Recorder: Click the "Record" button (or use your bound hotkey). Perform your sequence of clicks, mouse movements, and keyboard inputs. Stop recording, edit your script in the editor if necessary, and hit "Play" to watch the automation execute.
-
-My Contribution & Reflection
-
-This was a solo project where I architected and developed the entire application from the ground up.
-
-Challenge & Lesson Learned: One of the primary technical challenges was managing the GUI's main loop alongside global keyboard listeners and infinite clicking loops. Early iterations caused the Tkinter interface to freeze. I solved this by implementing multi-threading with threading.Event() to safely pass stop signals, and utilized Tkinter's .after() method to safely queue UI updates (like the progress bar and status text) from the background threads.
-
-License
-
-All Rights Reserved. This project is provided for portfolio demonstration purposes only. Unauthorized copying, modification, or distribution of the source code is prohibited.
+3. Run the application:
+`python main.py`
