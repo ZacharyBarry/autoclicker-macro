@@ -1,7 +1,31 @@
+import sys
+import subprocess
+import os
 import time
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+
+
+# --- AUTO-INSTALL DEPENDENCIES ---
+def ensure_dependencies():
+    try:
+        import pynput
+        import mss
+        from PIL import Image
+    except ImportError:
+        print("Missing required libraries. Installing them automatically...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pynput", "mss", "Pillow"])
+            print("Installation successful! Restarting application...")
+            os.execl(sys.executable, sys.executable, *sys.argv)
+        except Exception as e:
+            print(f"Auto-install failed. Please manually run: pip install pynput mss Pillow\nError: {e}")
+            sys.exit(1)
+
+
+ensure_dependencies()
+
 from pynput import mouse, keyboard
 import mss
 from PIL import Image
@@ -17,9 +41,7 @@ class TextLineNumbers(tk.Canvas):
         self.textwidget = text_widget
 
     def redraw(self, *args):
-        '''Redraw line numbers'''
         self.delete("all")
-
         i = self.textwidget.index("@0,0")
         while True:
             dline = self.textwidget.dlineinfo(i)
@@ -33,6 +55,7 @@ class TextLineNumbers(tk.Canvas):
 class CustomText(tk.Text):
     def __init__(self, *args, **kwargs):
         tk.Text.__init__(self, *args, **kwargs)
+        self.highlighting_enabled = True  # Added to prevent lag during recording
 
         self.tag_config("MOVE", foreground="#007bff")
         self.tag_config("WAIT", foreground="#6c757d")
@@ -42,7 +65,6 @@ class CustomText(tk.Text):
         self.tag_config("KEY_UP", foreground="#fd7e14")
         self.tag_config("WAIT_PIXEL", foreground="#ffc107")
         self.tag_config("COMMENT", foreground="#6a737d")
-
         self.bind("<<Modified>>", self._on_change)
         self.bind("<Configure>", self._on_change)
 
@@ -51,10 +73,11 @@ class CustomText(tk.Text):
         self.event_generate("<<Change>>")
 
     def highlight(self):
-        # Basic highlighter, could be optimized for very large files
+        if not self.highlighting_enabled:
+            return  # Skip processing if we are mass-inputting text
+
         for tag in self.tag_names():
             self.tag_remove(tag, "1.0", "end")
-
         for i, line in enumerate(self.get("1.0", "end-1c").split("\n")):
             line_num = i + 1
             if "MOVE" in line:
@@ -79,10 +102,9 @@ class AutoClickerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Auto-Clicker Pro")
-        self.root.geometry("750x750")  # Increased height to prevent cutoff
+        self.root.geometry("750x750")
         self.root.minsize(600, 500)
 
-        # --- Initialize all instance attributes ---
         self.is_clicking = False
         self.is_recording = False
         self.is_playing = False
@@ -105,9 +127,25 @@ class AutoClickerApp:
         self.record_hotkey = keyboard.Key.f10
         self.play_hotkey = keyboard.Key.f12
 
-        # --- Main UI Setup ---
-        # Create widgets first
-        notebook = ttk.Notebook(root)
+        # --- SCROLLBAR FIX ---
+        self.canvas = tk.Canvas(root, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.bind('<Configure>', lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width))
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+        notebook = ttk.Notebook(self.scrollable_frame)
         notebook.pack(pady=10, padx=10, fill="both", expand=True)
 
         self.clicker_frame = ttk.Frame(notebook)
@@ -119,16 +157,17 @@ class AutoClickerApp:
         self.create_clicker_tab(self.clicker_frame)
         self.create_macro_tab(self.macro_frame)
 
-        # Now that widgets exist, set up styles
         self.setup_styles()
 
-        # Final setup
         self.global_listener = keyboard.Listener(on_press=self.on_global_press, on_release=self.on_global_release)
         self.global_listener.start()
 
         self.root.attributes("-topmost", True)
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_ui_states()
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def setup_styles(self):
         self.style = ttk.Style(self.root)
@@ -141,6 +180,7 @@ class AutoClickerApp:
         entry_bg = "white" if mode == 'light' else "#3c3c3c"
 
         self.root.configure(background=bg_color)
+        self.canvas.configure(bg=bg_color)
         self.style.configure("TFrame", background=bg_color)
         self.style.configure("TLabel", background=bg_color, foreground=fg_color)
         self.style.configure("TLabelframe", background=bg_color, bordercolor=fg_color)
@@ -153,7 +193,16 @@ class AutoClickerApp:
         self.style.map("TButton", background=[('active', '#007bff')])
         self.script_text.config(background=entry_bg, foreground=fg_color, insertbackground=fg_color)
 
-    # --- TAB 1: AUTO-CLICKER ---
+    def validate_interval(self, P):
+        if P == "" or P == ".":
+            return True
+        try:
+            val = float(P)
+            if val < 0: return False
+            return True
+        except ValueError:
+            return False
+
     def create_clicker_tab(self, parent):
         parent.pack(fill="both", expand=True, padx=10, pady=10)
         self.click_location_mode = tk.IntVar(value=0)
@@ -168,7 +217,11 @@ class AutoClickerApp:
         clicking_frame.pack(fill="x", pady=5)
         clicking_frame.columnconfigure(1, weight=1)
         ttk.Label(clicking_frame, text="Interval (s):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.interval_entry = ttk.Entry(clicking_frame, textvariable=self.interval_var, width=10)
+
+        vcmd = (parent.register(self.validate_interval), '%P')
+        self.interval_entry = ttk.Entry(clicking_frame, textvariable=self.interval_var, width=10, validate='key',
+                                        validatecommand=vcmd)
+
         self.interval_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         self.loc_mode_current = ttk.Radiobutton(clicking_frame, text="Click at current mouse position",
                                                 variable=self.click_location_mode, value=0,
@@ -210,12 +263,11 @@ class AutoClickerApp:
         control_frame.columnconfigure((0, 1), weight=1)
         self.start_button = ttk.Button(control_frame, text="▶ Start", command=self.start_clicker)
         self.start_button.grid(row=0, column=0, sticky="ew", padx=5)
-        self.stop_button = ttk.Button(control_frame, text="⏹ Stop", command=self.stop_clicker, state=tk.DISABLED)
+        self.stop_button = ttk.Button(control_frame, text="⏹ Stop (Esc)", command=self.stop_clicker, state=tk.DISABLED)
         self.stop_button.grid(row=0, column=1, sticky="ew", padx=5)
         ttk.Label(parent, textvariable=self.clicker_status_var, relief="sunken", padding=5).pack(fill="x",
                                                                                                  side="bottom")
 
-    # --- TAB 2: MACRO RECORDER ---
     def create_macro_tab(self, parent):
         parent.pack(fill="both", expand=True)
         parent.rowconfigure(2, weight=1)
@@ -225,8 +277,15 @@ class AutoClickerApp:
         self.macro_status_var = tk.StringVar()
         self.record_hotkey_var = tk.StringVar(value=self.get_key_name(self.record_hotkey))
         self.play_hotkey_var = tk.StringVar(value=self.get_key_name(self.play_hotkey))
-        self.playback_speed_var = tk.DoubleVar(value=1.0)
         self.schedule_var = tk.StringVar(value="0")
+
+        # --- FORMATTED SPEED MODIFIER ---
+        self.playback_speed_var = tk.DoubleVar(value=1.0)
+        self.formatted_speed_var = tk.StringVar(value="1.00x")
+
+        # Observer to update the string instantly when the slider moves
+        self.playback_speed_var.trace_add("write", lambda *args: self.formatted_speed_var.set(
+            f"{self.playback_speed_var.get():.2f}x"))
 
         controls_frame = ttk.LabelFrame(parent, text="Controls", padding=10)
         controls_frame.grid(row=0, column=0, sticky="ew", pady=5, padx=10)
@@ -235,7 +294,8 @@ class AutoClickerApp:
         self.record_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
         self.play_button = ttk.Button(controls_frame, text="▶ Play", command=self.toggle_playback)
         self.play_button.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        self.stop_macro_button = ttk.Button(controls_frame, text="⏹ Stop", command=self.stop_all_macro_activity,
+
+        self.stop_macro_button = ttk.Button(controls_frame, text="⏹ Stop (Esc)", command=self.stop_all_macro_activity,
                                             state=tk.DISABLED)
         self.stop_macro_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
 
@@ -261,10 +321,15 @@ class AutoClickerApp:
         self.repeat_entry = ttk.Entry(options_frame, textvariable=self.repeat_var, width=5)
         self.repeat_entry.pack(side="left")
         ttk.Label(options_frame, text="Speed:").pack(side="left", padx=(10, 0))
-        self.speed_scale = ttk.Scale(options_frame, from_=0.1, to=3.0, variable=self.playback_speed_var,
+
+        # Max speed increased to 10.0
+        self.speed_scale = ttk.Scale(options_frame, from_=0.1, to=10.0, variable=self.playback_speed_var,
                                      orient="horizontal")
         self.speed_scale.pack(side="left", padx=5)
-        ttk.Label(options_frame, textvariable=self.playback_speed_var).pack(side="left")
+
+        # Display formatted variable with a fixed width to prevent UI jitter
+        ttk.Label(options_frame, textvariable=self.formatted_speed_var, width=6).pack(side="left")
+
         ttk.Label(options_frame, text="Schedule (sec):").pack(side="left", padx=(10, 0))
         self.schedule_entry = ttk.Entry(options_frame, textvariable=self.schedule_var, width=5)
         self.schedule_entry.pack(side="left", padx=5)
@@ -285,7 +350,9 @@ class AutoClickerApp:
         scrollbar = ttk.Scrollbar(editor_frame, orient="vertical", command=self.script_text.yview)
         scrollbar.pack(side="right", fill="y")
         self.script_text.config(yscrollcommand=scrollbar.set)
-        self.script_text.bind("<<Change>>", lambda e: self.linenumbers.redraw())
+
+        # Only redraw line numbers if we aren't heavily recording
+        self.script_text.bind("<<Change>>", self._on_text_change)
         self.script_text.bind("<<Modified>>", self.on_script_modify)
 
         file_frame = ttk.Frame(parent)
@@ -305,7 +372,10 @@ class AutoClickerApp:
         self.macro_status_var_label = ttk.Label(parent, textvariable=self.macro_status_var, relief="sunken")
         self.macro_status_var_label.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 10))
 
-    # --- CLICKER LOGIC ---
+    def _on_text_change(self, event=None):
+        if not self.is_recording:
+            self.linenumbers.redraw()
+
     def start_clicker(self):
         if self.is_clicking: return
         try:
@@ -348,9 +418,9 @@ class AutoClickerApp:
 
     def on_location_click(self, x, y, _button, pressed):
         if pressed:
-            self.root.deiconify();
+            self.root.deiconify()
             self.root.lift()
-            self.x_var.set(str(x));
+            self.x_var.set(str(x))
             self.y_var.set(str(y))
             self.show_status_message(f"Location set to ({x}, {y})")
             if self.location_listener:
@@ -358,7 +428,6 @@ class AutoClickerApp:
                 self.location_listener = None
             return False
 
-    # --- MACRO LOGIC ---
     def toggle_recording(self):
         if self.is_recording:
             self.stop_recording()
@@ -368,13 +437,13 @@ class AutoClickerApp:
     def start_recording(self):
         self.is_recording = True
         self.is_mouse_down = False
+        self.script_text.highlighting_enabled = False  # Kill syntax parsing lag
+
         self.script_text.delete("1.0", tk.END)
         self.last_event_time = time.time()
+        self.last_recorded_pos = (0, 0)
         self.update_ui_states()
-        self.recording_listener = mouse.Listener(
-            on_move=self.on_record_move,
-            on_click=self.on_record_click
-        )
+        self.recording_listener = mouse.Listener(on_move=self.on_record_move, on_click=self.on_record_click)
         self.recording_listener.start()
 
     def stop_recording(self):
@@ -382,6 +451,12 @@ class AutoClickerApp:
             self.recording_listener.stop()
             self.recording_listener = None
         self.is_recording = False
+
+        # Turn UI back on and render everything at once
+        self.script_text.highlighting_enabled = True
+        self.script_text.highlight()
+        self.linenumbers.redraw()
+
         self.update_ui_states()
 
     def on_script_modify(self, event):
@@ -396,11 +471,14 @@ class AutoClickerApp:
 
     def on_record_move(self, x, y):
         if self.is_mouse_down:
-            current_time = time.time()
-            wait_time = current_time - self.last_event_time
-            self.add_script_line(f"WAIT,{wait_time:.4f}")
-            self.add_script_line(f"MOVE,{x},{y}")
-            self.last_event_time = current_time
+            last_x, last_y = self.last_recorded_pos
+            if abs(x - last_x) > 5 or abs(y - last_y) > 5:
+                current_time = time.time()
+                wait_time = current_time - self.last_event_time
+                self.add_script_line(f"WAIT,{wait_time:.4f}")
+                self.add_script_line(f"MOVE,{x},{y}")
+                self.last_event_time = current_time
+                self.last_recorded_pos = (x, y)
 
     def on_record_click(self, x, y, button, pressed):
         wait_time = time.time() - self.last_event_time
@@ -544,6 +622,8 @@ class AutoClickerApp:
                 r, g, b = pixel
             self.add_script_line(f"WAIT_PIXEL,{x},{y},{r},{g},{b}")
             self.root.deiconify()
+            messagebox.showinfo("Pixel Captured",
+                                f"Color grabbed and added to script!\n\nCoordinates: ({x}, {y})\nRGB: ({r}, {g}, {b})")
             return False
 
     def load_script(self):
@@ -565,7 +645,6 @@ class AutoClickerApp:
                 f.write(self.script_text.get("1.0", tk.END))
             self.script_dirty = False
 
-    # --- GLOBAL & UI LOGIC ---
     def get_key_name(self, key):
         try:
             return key.char
@@ -573,7 +652,6 @@ class AutoClickerApp:
             return key.name
 
     def parse_key(self, key_name):
-        # This is a simple parser. A more robust one would handle all special keys.
         if len(key_name) == 1:
             return key_name
         else:
@@ -589,6 +667,12 @@ class AutoClickerApp:
         self.update_ui_states()
 
     def on_global_press(self, key):
+        if key == keyboard.Key.esc:
+            self.stop_clicker()
+            self.stop_all_macro_activity()
+            self.show_status_message("EMERGENCY STOP TRIGGERED")
+            return
+
         if self.hotkey_to_set:
             key_name = self.get_key_name(key)
             if self.hotkey_to_set == 'clicker':
@@ -634,7 +718,6 @@ class AutoClickerApp:
     def update_ui_states(self):
         is_busy = self.is_clicking or self.is_recording or self.is_playing or self.hotkey_to_set
 
-        # --- Clicker Tab UI ---
         clicker_state = tk.DISABLED if is_busy else tk.NORMAL
         self.start_button.config(state=tk.DISABLED if self.is_clicking else clicker_state)
         self.stop_button.config(state=tk.NORMAL if self.is_clicking else tk.DISABLED)
@@ -644,17 +727,29 @@ class AutoClickerApp:
                   self.clicker_hotkey_entry, self.set_clicker_hotkey_button, self.always_on_top_check,
                   self.dark_mode_check]:
             w.config(state=clicker_state if w is not self.clicker_hotkey_entry else "readonly")
+
         if not self.hotkey_to_set:
             clicker_status = "Running..." if self.is_clicking else "Stopped"
             self.clicker_status_var.set(f"Status: {clicker_status} | Hotkey: {self.get_key_name(self.clicker_hotkey)}")
 
-        # --- Macro Tab UI ---
         self.record_button.config(state=tk.DISABLED if self.is_playing or self.hotkey_to_set else tk.NORMAL)
+        if self.is_recording:
+            self.record_button.config(text="⏹ Stop Rec")
+        else:
+            self.record_button.config(text="⏺ Record")
+
         self.play_button.config(state=tk.DISABLED if self.is_recording or self.hotkey_to_set else tk.NORMAL)
+        if self.is_playing:
+            self.play_button.config(text="⏹ Stop Play")
+        else:
+            self.play_button.config(text="▶ Play")
+
         self.stop_macro_button.config(state=tk.NORMAL if self.is_recording or self.is_playing else tk.DISABLED)
+
         script_box_state = tk.DISABLED if self.is_playing else tk.NORMAL
         self.script_text.config(state=script_box_state)
         macro_busy_state = tk.DISABLED if self.is_recording or self.is_playing or self.hotkey_to_set else tk.NORMAL
+
         for w in [self.repeat_entry, self.load_button, self.save_button, self.play_hotkey_entry,
                   self.record_hotkey_entry, self.schedule_button, self.schedule_entry, self.speed_scale,
                   self.clear_button, self.get_pixel_button]:
@@ -663,12 +758,11 @@ class AutoClickerApp:
 
         if not self.hotkey_to_set:
             if self.is_recording:
-                macro_status = "Status: Recording..."
+                self.macro_status_var.set("Status: Recording...")
             elif self.is_playing:
-                macro_status = "Status: Playing..."
+                self.macro_status_var.set("Status: Playing...")
             else:
-                macro_status = "Status: Idle"
-            self.macro_status_var.set(macro_status)
+                self.macro_status_var.set("Status: Idle")
 
     def on_closing(self):
         if self.script_dirty:
