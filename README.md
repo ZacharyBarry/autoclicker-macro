@@ -1,6 +1,6 @@
 # AutoClicker Pro
 
-![Project Demo](demo.gif)
+![AUTOCLICKERDEMO](https://github.com/user-attachments/assets/21b402ff-8845-4c70-b51b-2edb842fc7ff)
 
 A multi-threaded Python desktop automation tool featuring a standard auto-clicker and an advanced macro recorder with a custom, syntax-highlighted script editor.
 
